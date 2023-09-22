@@ -1,0 +1,6 @@
+# Python env 
+env/*
+
+# Dataset
+bdd100k/*
+DataSandbox/*
