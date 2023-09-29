@@ -1,6 +1,10 @@
 # Python env 
 env/*
+.env
 
 # Dataset
 bdd100k/*
 DataSandbox/*
+
+# MongoDB
+mongoData/*
