@@ -6,6 +6,7 @@ import random
 plt.clf()
 
 def crop_polygon(polygon, tile_size):
+    polygons = []
     points = []
     last_point = polygon[0]
     # polygon = polygon[:-1]
@@ -50,11 +51,15 @@ def crop_polygon(polygon, tile_size):
                     and (tile_size - c) / m >= 0 and (tile_size - c) / m <= tile_size:
                     x = (tile_size - c) / m
                     points.append([x, tile_size])
+            if not point_inside:
+                polygons.append(points)
+                points = []
         if point_inside:
             points.append(point)
-                
         last_point = point
-    return points
+    if len(points) > 0:
+        polygons.append(points)
+    return polygons
             
 
 
@@ -83,16 +88,18 @@ def draw_loop(sides, iter):
 
 
             cropped = crop_polygon(polygon[:i], 128)
-            if len(cropped) >= 2 :
-                xs2, ys2 = zip(*crop_polygon(polygon[:i], 128))
-                plt.plot(xs2, ys2, 'bo')
+            print(cropped)
+            for cropped_poly in cropped:
+                if len(cropped_poly) >= 2:
+                    xs2, ys2 = zip(*cropped_poly)
+                    plt.plot(xs2, ys2)
             
 
             plt.pause(1) 
             plt.draw()
 
 def draw_one():
-    polygon = [[50, -10], [200, 150]]
+    polygon = [[50, -10], [200, 150], [30, 50], [30, 150], [10, 150], [5, 100], [5, 30], [50, -10]]
     
     plt.clf()
     plt.xlim(-128, 256)
@@ -102,13 +109,21 @@ def draw_one():
     plt.plot(xs, ys)
     plt.plot([0, 0, 128, 128, 0], [0, 128, 128, 0, 0])
 
-
     cropped = crop_polygon(polygon, 128)
-    if len(cropped) >= 2 :
-        xs2, ys2 = zip(*crop_polygon(polygon, 128))
-        plt.plot(xs2, ys2)
+    
+    for cropped_poly in cropped:
+        if len(cropped_poly) >= 2:
+            xs2, ys2 = zip(*cropped_poly)
+            plt.plot(xs2, ys2)
+            xs2, ys2 = zip(*filter((lambda x: x[0] == 0 or x[0] == 128 or x[1] == 0 or x[1] == 128), cropped_poly))
+            plt.plot(xs2, ys2, 'bo')
+
+    # cropped = crop_polygon(polygon, 128)
+    # if len(cropped) >= 2 :
+    #     xs2, ys2 = zip(*crop_polygon(polygon, 128))
+    #     plt.plot(xs2, ys2)
 
     plt.show()
 
-# draw_one()
-draw_loop(8, 5)
+draw_one()
+# draw_loop(8, 5)
