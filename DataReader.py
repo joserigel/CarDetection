@@ -12,11 +12,11 @@ async def connect():
     uri = f"mongodb://{os.environ.get('MONGO_USER')}:{os.environ.get('MONGO_PASS')}@localhost:27017"
     client = AsyncIOMotorClient(uri)
     db = client['bdd100k']
-    return db['sem_seg_polygons']
+    return db['sem_seg_polygons_val']
 
 async def main():
     print("Loading!")
-    with open('./bdd100k/labels/sem_seg/polygons/sem_seg_train.json') as f:
+    with open('./bdd100k/labels/sem_seg/polygons/sem_seg_val.json') as f:
         datas = json.load(f)
         print("Loaded!")
         collection = await connect()

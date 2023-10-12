@@ -1,6 +1,7 @@
 # Python env 
 env/*
 .env
+__pycache__
 
 # Dataset
 bdd100k/*
