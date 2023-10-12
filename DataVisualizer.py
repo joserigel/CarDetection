@@ -10,16 +10,19 @@ import os
 load_dotenv()
 
 class BoundingBox():
-    async def create():
+    async def create(test: bool = False):
         self = BoundingBox()
-        self.collection = await BoundingBox.getCollection()
+        self.collection = await BoundingBox.getCollection(test)
         return self
 
-    async def getCollection():
+    async def getCollection(test: bool = False):
         uri = f"mongodb://{os.environ.get('MONGO_USER')}:{os.environ.get('MONGO_PASS')}@localhost:27017"
         client = AsyncIOMotorClient(uri)
         db = client['bdd100k']
-        return db['sem_seg_polygons']
+        if not test:
+            return db['sem_seg_polygons']
+        else:
+            return db['sem_seg_polygons_val']
 
     async def getPolygons(self, file_name, categories = ["car", "truck", "bus"]):
         result = await self.collection.find_one({
@@ -34,6 +37,9 @@ class BoundingBox():
         img = plt.imread(file)
         x = 0
         y = 0
+
+        if False in [Polygon(x).is_valid for x in polygons]:
+            raise Exception("Invalid Polygon")
 
         imgAndBox = []
         while y+tile_size <= img.shape[0]:
@@ -100,11 +106,12 @@ class BoundingBox():
             
 async def main():
     instance = await BoundingBox.create()
-    datas = await instance.getImgAndBox("DataSandbox/train/4a396379-37154446.jpg", 256)
+    datas = await instance.getImgAndBox("./bdd100k/images/10k/train/0a0a0b1a-7c39d841.jpg", 256)
     for img, box in datas:
+        plt.clf()
         plt.imshow(img)
         plt.plot([box[0], box[0], box[1], box[1], box[0]],
                 [box[2], box[3], box[3], box[2], box[2]])
-        plt.show()
+        plt.pause(0.5)
 
 # asyncio.run(main())
