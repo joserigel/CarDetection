@@ -9,3 +9,6 @@ DataSandbox/*
 
 # MongoDB
 mongoData/*
+
+# Checkpoints
+models/*

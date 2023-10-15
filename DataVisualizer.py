@@ -85,11 +85,9 @@ class BoundingBox():
         
         if (len(bounds) == 0):
             return (0, 0, 0, 0)
-        left = min(list(map(lambda x: x[0], bounds)))
-        right = max(list(map(lambda x: x[1], bounds)))
-        bottom = min(list(map(lambda x: x[2], bounds)))
-        top = max(list(map(lambda x: x[3], bounds)))
-        return (left - x, right - x, bottom - y, top - y)
+        bounds = sorted(bounds, key=(lambda x: (x[1] - x[0]) * (x[3] - x[2])), reverse=True)
+        bound = bounds[0]
+        return (bound[0] - x, bound[1] - x, bound[2] - y, bound[3] - y)
 
 
     def adjustPolygons(polygons, x, y):
