@@ -7,6 +7,7 @@ import torch.nn as nn
 import numpy as np
 import matplotlib.pyplot as plt
 from tqdm import tqdm
+import random
 
 import os
 import asyncio
@@ -17,6 +18,9 @@ from DataVisualizer import BoundingBox
 from dotenv import load_dotenv
 import os
 load_dotenv()
+
+train_device = 'cuda' if torch.cuda.is_available() else 'cpu'
+print("====", "USING CUDA GPU" if train_device == 'cuda' else "USING CPU (SLOW)", "====")
 
 class Segmentation(nn.Module):
     def __init__(self):
@@ -56,7 +60,6 @@ class Segmentation(nn.Module):
 
         x = torch.cat((r, g, b), 1)
         x = self.combine(x)
-        x = torch.clamp(x, -1, 1)
         return x
 
 def box_to_polygon(box):
@@ -64,36 +67,38 @@ def box_to_polygon(box):
                 [box[2], box[3], box[3], box[2], box[2]])
 
 
-async def train(epoch):
+async def train(epoch, load_last = True):
     instance = await BoundingBox.create()
     path = "./bdd100k/images/10k/train/"
     images = os.listdir(path)
+    random.shuffle(images)
     
     # Variables
     tile_size = 256
-    min_size = 0
-    max_size = tile_size
 
-    model = Segmentation().cuda()
+    model = Segmentation().to(device=train_device)
     checkpoint_lists = list(filter(lambda x: "segmentation" in x, os.listdir("./models")))
     last_checkpoint = 0
     if len(checkpoint_lists) > 0 :
         last_checkpoint = int(sorted(checkpoint_lists)[-1].split(".")[0].split("_")[-1])
         print("LAST_CHECKPOINT: ", f"segmentation_{last_checkpoint}")
-        model.load_state_dict(torch.load(f'./models/segmentation_{last_checkpoint}.pth'))
+        if load_last:
+            model.load_state_dict(torch.load(f'./models/segmentation_{last_checkpoint}.pth'))
+        else:
+            print("Checkpoint not loaded")
 
     optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.0001)
     criterion = nn.L1Loss()
 
-    learning_rate = 0.05
-    momentum = 0.005
+    learning_rate = 0.01
+    momentum = 0.003
     decay = 1
 
     running_loss = 0
     invalid = 0
     tested = 0
     for i in range(epoch):
-        print(f"EPOCH {i+1} ============")
+        print(f"EPOCH {i+1} ============", f"Learning Rate: {learning_rate}", f"Momentum: {momentum}")
         optimizer = optim.SGD(model.parameters(), lr=learning_rate * (decay ** i), momentum=momentum * (decay ** i))
         for i in  tqdm(range(len(images) - 4000)):
             file = path + images[i]
@@ -103,17 +108,16 @@ async def train(epoch):
                 valid_imgs = []
                 valid_boxes = []
                 for img, box in datas:
-                    if box != (0, 0, 0, 0):
+                    if box != (0, 0, 0, 0) and (box[1] - box[0] >= 10) and (box[3] - box[2] >= 10):
                         valid_imgs.append(img)
                         valid_boxes.append(box)
 
                 if (len(valid_imgs) > 0):
-                    valid_imgs = torch.tensor(np.array(valid_imgs), dtype=torch.float).cuda() / 256
+                    valid_imgs = torch.tensor(np.array(valid_imgs), dtype=torch.float).to(device=train_device) / 256
                     valid_imgs = torch.transpose(valid_imgs, 1, 3)
 
-                    valid_boxes = torch.tensor(np.array(valid_boxes), dtype=torch.float).cuda() * (2 / tile_size)
+                    valid_boxes = torch.tensor(np.array(valid_boxes), dtype=torch.float).to(device=train_device) * (2 / tile_size)
                     valid_boxes = valid_boxes - 1
-
                     
                     optimizer.zero_grad()
                     output = model(valid_imgs)
@@ -127,7 +131,9 @@ async def train(epoch):
             
 
             except Exception as e:
-                if str(e) != "Invalid Polygon":
+                if str(e) not in ["Invalid Polygon", 
+                                  "'Line String' object has no attribute 'geoms'",
+                                  ]:
                     print(e)
                 invalid += 1
             if (i % 1000 == 0):
@@ -152,7 +158,7 @@ async def eval():
     model = Segmentation().cuda()
     
     last_checkpoint = sorted(os.listdir("./models"))[-1].split(".")[0].split("_")[-1]
-    print(last_checkpoint)
+    print("EVALUATING:", last_checkpoint)
     model.load_state_dict(torch.load(f'./models/segmentation_{last_checkpoint}.pth'))
 
     total = 0
@@ -196,23 +202,6 @@ async def eval():
     print("Accuracy:", f'{(correct/total)*100:.2f}%')
     print("Invalid:", invalid)
     print("Tested:", tested)
-
-
-async def sandbox():
-    # path = "./bdd100k/images/10k/train/"
-    # images = os.listdir(path)
-
-    # instance = await BoundingBox.create()
-    # datas = await instance.getImgAndBox("./bdd100k/images/10k/train/0a0a0b1a-7c39d841.jpg", 256)
-    # img, box = datas[0]
-    # img = torch.tensor([img])
-    # img = torch.transpose(img, 1, 3)
-
-    # model = Segmentation()
-    # x = model(img)
-    # print(x.shape)
-    last_checkpoint = int(sorted(os.listdir("./models"))[-1].split(".")[0].split("n")[-1])
-    print(last_checkpoint)
 
 asyncio.run(train(1))
 asyncio.run(eval())
