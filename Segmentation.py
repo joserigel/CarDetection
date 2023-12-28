@@ -25,17 +25,17 @@ print("====", "USING CUDA GPU" if train_device == 'cuda' else "USING CPU (SLOW)"
 class Segmentation(nn.Module):
     def __init__(self):
         super(Segmentation, self).__init__()
-        self.conv1 = nn.Conv2d(3, 3, kernel_size=(4, 4), stride=(4, 4), padding=0)
+        self.conv1 = nn.Conv2d(3, 3, kernel_size=(8, 4), stride=(8, 4), padding=0)
         self.layer_r = nn.Sequential(
-            nn.Linear(64*64, 128*128),
-            nn.Linear(128*128, 64*64),
+            nn.Linear(32*64, 256*128),
+            nn.Linear(256*128, 64*64),
         )
         self.layer_g = nn.Sequential(
-            nn.Linear(64*64, 128*128),
+            nn.Linear(32*64, 128*128),
             nn.Linear(128*128, 64*64),
         )
         self.layer_b = nn.Sequential(
-            nn.Linear(64*64, 128*128),
+            nn.Linear(32*64, 128*128),
             nn.Linear(128*128, 64*64),
         )
         self.combine = nn.Sequential(
@@ -87,20 +87,19 @@ async def train(epoch, load_last = True):
         else:
             print("Checkpoint not loaded")
 
-    optimizer = optim.SGD(model.parameters(), lr=0.01, momentum=0.0001)
-    criterion = nn.L1Loss()
+    criterion = nn.MSELoss(size_average=0.5)
 
-    learning_rate = 0.01
-    momentum = 0.003
-    decay = 1
+    learning_rate = 0.001
+    momentum = 0.00003
+    decay = 0.5
 
     running_loss = 0
     invalid = 0
     tested = 0
     for i in range(epoch):
-        print(f"EPOCH {i+1} ============", f"Learning Rate: {learning_rate}", f"Momentum: {momentum}")
-        optimizer = optim.SGD(model.parameters(), lr=learning_rate * (decay ** i), momentum=momentum * (decay ** i))
-        for i in  tqdm(range(len(images) - 4000)):
+        print(f"EPOCH {i+1}/{epoch} ============", f"Learning Rate: {learning_rate * (decay ** i)}", f"Momentum: {momentum * (decay ** i)}")
+        optimizer = optim.RMSprop(model.parameters(), lr=learning_rate * (decay ** i), momentum=momentum * (decay ** i))
+        for i in  tqdm(range(len(images) - 6700)):
             file = path + images[i]
             try:
                 datas = await instance.getImgAndBox(file, tile_size=tile_size)
@@ -132,11 +131,12 @@ async def train(epoch, load_last = True):
 
             except Exception as e:
                 if str(e) not in ["Invalid Polygon", 
-                                  "'Line String' object has no attribute 'geoms'",
+                                  "'LineString' object has no attribute 'geoms'",
+                                  "'Point' object has no attribute 'geoms'"
                                   ]:
                     print(e)
                 invalid += 1
-            if (i % 1000 == 0):
+            if (i % 100 == 0):
                 print(running_loss / (i + 1))
 
     torch.save(model.state_dict(), f'./models/segmentation_{last_checkpoint + 1}.pth')
@@ -181,6 +181,7 @@ async def eval():
                     img = img.cuda()
                     img = torch.transpose(img, 1, 3)
                     output = model(img)
+                    print(output)
                     output = (output[0] + 1) * (tile_size / 2)
 
                     # Calculate Accuracy
@@ -196,13 +197,16 @@ async def eval():
                     plt.plot(gtX, gtY, 'b')
                     plt.pause(0.5)
         except Exception as e:
-            # if e != Exception("Invalid Polygon"):
-            #     print(e)
+            if str(e) not in ["Invalid Polygon", 
+                                  "'LineString' object has no attribute 'geoms'",
+                                  "'Point' object has no attribute 'geoms'"
+                                  ]:
+                print(e)
             invalid += 1
     print("Accuracy:", f'{(correct/total)*100:.2f}%')
     print("Invalid:", invalid)
     print("Tested:", tested)
 
-asyncio.run(train(1))
+asyncio.run(train(3))
 asyncio.run(eval())
 # asyncio.run(sandbox())
