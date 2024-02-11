@@ -31,7 +31,7 @@ class Polygon():
     
 async def getClassesCount():
     instance = await Polygon.create()
-    dir = './bdd100k/images/10k/train/'
+    dir = f"{os.environ.get('BDD100K_DIR')}/images/10k/train/"
     categories = {}
     for pic in tqdm(os.listdir(dir)):
         data = await instance.getData(pic)
@@ -40,9 +40,13 @@ async def getClassesCount():
                 categories[label["category"]] += 1
             else:
                 categories[label["category"]] = 1
+    categories = dict(sorted(categories.items(), key=lambda x: x[1], reverse=True))
+    for k, v in categories.items():
+        print(f"{k}:", v)
 
 async def main():
     instance = await Polygon.create()
-    datas = await instance.getData("0a0a0b1a-7c39d841.jpg")
+    # datas = await instance.getData("0a0a0b1a-7c39d841.jpg")
+    print(os.environ.get('BDD100K_DIR'))
     
 asyncio.run(getClassesCount())
