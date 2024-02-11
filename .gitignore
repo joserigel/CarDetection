@@ -12,3 +12,6 @@ mongoData/*
 
 # Checkpoints
 models/*
+
+#Examples
+example.json

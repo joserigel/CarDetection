@@ -13,7 +13,7 @@ import os
 import asyncio
 from motor.motor_asyncio import AsyncIOMotorClient
 
-from DataVisualizer import BoundingBox
+from DataVisualizer import Polygon
 
 from dotenv import load_dotenv
 import os
@@ -68,7 +68,7 @@ def box_to_polygon(box):
 
 
 async def train(epoch, load_last = True):
-    instance = await BoundingBox.create()
+    instance = await Polygon.create()
     path = "./bdd100k/images/10k/train/"
     images = os.listdir(path)
     random.shuffle(images)
@@ -146,7 +146,7 @@ async def train(epoch, load_last = True):
     print("Tested:", tested)
 
 async def eval():
-    instance = await BoundingBox.create(test=True)
+    instance = await Polygon.create(test=True)
     path = "./bdd100k/images/10k/val/"
     images = os.listdir(path)
     
