@@ -21,50 +21,44 @@ BDD100K_DIR=./bdd100k
 <summary>Directory Structure</summary>
 
 ```
-.
+LaneDetection
 ├── bdd100k
-├── bdd100k
-    ├── images
-    │   └── 10k
-    │       ├── test
-    │       ├── train
-    │       └── val
-    └── labels
-        ├── ins_seg
-        │   ├── bitmasks
-        │   │   ├── train
-        │   │   └── val
-        │   ├── colormaps
-        │   │   ├── train
-        │   │   └── val
-        │   ├── polygons
-        │   └── rles
-        ├── lane
-        │   ├── colormaps
-        │   │   ├── train
-        │   │   └── val
-        │   ├── masks
-        │   │   ├── train
-        │   │   └── val
-        │   └── polygons
-        └── sem_seg
-            ├── colormaps
-            │   ├── train
-            │   └── val
-            ├── masks
-            │   ├── train
-            │   └── val
-            ├── polygons
-            └── rles
-├── DataReader.py
-├── DataSandbox
-├── DataVisualizer.py
-├── docker-compose.yml
+│   ├── images
+│   │   └── 10k
+│   │       ├── test
+│   │       ├── train
+│   │       └── val
+│   └── labels
+│       ├── ins_seg
+│       │   ├── bitmasks
+│       │   │   ├── train
+│       │   │   └── val
+│       │   ├── colormaps
+│       │   │   ├── train
+│       │   │   └── val
+│       │   ├── polygons
+│       │   └── rles
+│       ├── lane
+│       │   ├── colormaps
+│       │   │   ├── train
+│       │   │   └── val
+│       │   ├── masks
+│       │   │   ├── train
+│       │   │   └── val
+│       │   └── polygons
+│       └── sem_seg
+│           ├── colormaps
+│           │   ├── train
+│           │   └── val
+│           ├── masks
+│           │   ├── train
+│           │   └── val
+│           ├── polygons
+│           └── rles
 ├── env
-├── example.json
-├── README.md
-├── requirements.txt
-└── Segmentation.py
+├── .env
+├── models
+└── mongoData
 ```
 
 </details>
