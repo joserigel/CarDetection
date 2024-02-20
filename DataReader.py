@@ -30,6 +30,8 @@ async def main():
     await loadIntoMongoDB(f'{os.environ.get("BDD100K_DIR")}/labels/lane/polygons/lane_val.json', 'lane_polygons_val')
     await loadIntoMongoDB(f'{os.environ.get("BDD100K_DIR")}/labels/ins_seg/polygons/ins_seg_train.json', 'ins_seg_polygons')
     await loadIntoMongoDB(f'{os.environ.get("BDD100K_DIR")}/labels/ins_seg/polygons/ins_seg_val.json', 'ins_seg_polygons_val')
+    await loadIntoMongoDB(f'{os.environ.get("BDD100K_DIR")}/labels/drivable/polygons/drivable_train.json', 'drivable_polygons')
+    await loadIntoMongoDB(f'{os.environ.get("BDD100K_DIR")}/labels/drivable/polygons/drivable_val.json', 'drivable_polygons_val')
 
 asyncio.run(main())
 

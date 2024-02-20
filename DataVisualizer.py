@@ -27,9 +27,10 @@ class Polygon():
         })
     
 async def getClassesCount():
-    instance = await Polygon.create('ins_seg_polygons')
-    dir = f"{os.environ.get('BDD100K_DIR')}/images/10k/train/"
+    instance = await Polygon.create('lane_polygons')
+    dir = f"{os.environ.get('BDD100K_DIR')}/images/100k/train/"
     categories = {}
+    error = 0
     for pic in tqdm(os.listdir(dir)):
         data = await instance.getData(pic)
         try:
@@ -39,10 +40,12 @@ async def getClassesCount():
                 else:
                     categories[label["category"]] = 1
         except Exception as e:
-            print(e)
+            error += 1
+            continue
     categories = dict(sorted(categories.items(), key=lambda x: x[1], reverse=True))
     for k, v in categories.items():
         print(f"{k}:", v)
+    print("error:", error, "of", len(os.listdir(dir)))
 
 async def main():
     instance = await Polygon.create('sem_seg_polygons')
