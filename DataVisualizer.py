@@ -1,56 +1,33 @@
-import matplotlib.pyplot as plt
-import os
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
+from Connection import connect
+import matplotlib.pyplot as plt
+import matplotlib.image as mpimg
 import numpy as np
-from shapely.geometry import Polygon
-from tqdm import tqdm
 
-from dotenv import load_dotenv
-import os
-load_dotenv()
-
-class Polygon():
-    uri = f"mongodb://{os.environ.get('MONGO_USER')}:{os.environ.get('MONGO_PASS')}@localhost:27017"
-    mongodb = "bdd100k"
-    async def create(collection: str):
-        self = Polygon()
-        self.collection = await Polygon.getCollection(collection)
-        return self
-    async def getCollection(collection: str):
-        client = AsyncIOMotorClient(Polygon.uri)
-        db = client[Polygon.mongodb]
-        return db[collection]
-    async def getData(self, path: str):
-        return await self.collection.find_one({
-            "name": path
-        })
-    
-async def getClassesCount():
-    instance = await Polygon.create('lane_polygons')
-    dir = f"{os.environ.get('BDD100K_DIR')}/images/100k/train/"
-    categories = {}
-    error = 0
-    for pic in tqdm(os.listdir(dir)):
-        data = await instance.getData(pic)
-        try:
-            for label in data["labels"]:
-                if label["category"] in categories:
-                    categories[label["category"]] += 1
-                else:
-                    categories[label["category"]] = 1
-        except Exception as e:
-            error += 1
-            continue
-    categories = dict(sorted(categories.items(), key=lambda x: x[1], reverse=True))
-    for k, v in categories.items():
-        print(f"{k}:", v)
-    print("error:", error, "of", len(os.listdir(dir)))
+import cv2
 
 async def main():
-    instance = await Polygon.create('sem_seg_polygons')
-    datas = await instance.getData("0a0a0b1a-7c39d841.jpg")
-    print(datas)
-    print(os.environ.get('BDD100K_DIR'))
+    dbConnection = await connect("sem_seg_polygons")
+    drivable = await dbConnection.find_one()
+    name = drivable["name"]
     
-asyncio.run(getClassesCount())
+    
+    img = cv2.imread(f"bdd100k/images/10k/train/{name}")
+    # img = np.zeros_like(img)
+    
+    for label in drivable["labels"]:
+        # print(label.keys())
+        if label["category"] == "car":
+            for polygon in label["poly2d"]:
+                pts = np.array([polygon["vertices"]])
+                pts.reshape((-1, 1, 2))
+                
+
+                cv2.fillPoly(img, pts.astype(dtype=np.int32), color=(255, 255, 255, 50))
+    print(name)
+    print(img.shape)
+    cv2.imshow(name, img)
+    cv2.waitKey(0)
+    cv2.destroyAllWindows()
+
+
