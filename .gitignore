@@ -6,6 +6,7 @@ __pycache__
 # Dataset
 bdd100k/*
 DataSandbox/*
+binaryDataset/*
 
 # MongoDB
 mongoData/*
