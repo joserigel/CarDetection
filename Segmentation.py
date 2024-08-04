@@ -1,212 +1,130 @@
 import torch
-import torchvision
-import torch.optim as optim
-import torch.nn.functional as F
 import torch.nn as nn
-
 import numpy as np
-import matplotlib.pyplot as plt
-from tqdm import tqdm
-import random
-
-import os
+import cv2
 import asyncio
-from motor.motor_asyncio import AsyncIOMotorClient
 
-from DataVisualizer import Polygon
+from Preprocessor import getBatch
 
-from dotenv import load_dotenv
-import os
-load_dotenv()
+# Set CUDA device
+cuda_device = 0
+train_device = f'cuda:{cuda_device}' if torch.cuda.is_available() else 'cpu'
+print("====", "USING CUDA GPU" if train_device == f'cuda:{cuda_device}' else "USING CPU (SLOW)", "====")
+train_device = torch.device(train_device)
 
-train_device = 'cuda' if torch.cuda.is_available() else 'cpu'
-print("====", "USING CUDA GPU" if train_device == 'cuda' else "USING CPU (SLOW)", "====")
-
+# Architecture
 class Segmentation(nn.Module):
     def __init__(self):
         super(Segmentation, self).__init__()
-        self.conv1 = nn.Conv2d(3, 3, kernel_size=(8, 4), stride=(8, 4), padding=0)
-        self.layer_r = nn.Sequential(
-            nn.Linear(32*64, 256*128),
-            nn.Linear(256*128, 64*64),
+        self.convolutional = nn.Sequential(
+            nn.Conv2d(3, 3, kernel_size=(5,5), padding=0, stride=(3, 3)),
+            nn.ReLU(),
+            nn.MaxPool2d((2, 2), (2, 2)),
+            nn.Conv2d(3, 3, kernel_size=(3,3), padding=0, stride=(1, 1)),
+            nn.ReLU(),
+            nn.MaxPool2d((2, 2), (2, 2)),
         )
-        self.layer_g = nn.Sequential(
-            nn.Linear(32*64, 128*128),
-            nn.Linear(128*128, 64*64),
+        self.linear = nn.Sequential(
+            nn.Flatten(),
+            nn.Linear(18270, 64*128),
+            nn.LeakyReLU(),
+            nn.Linear(64*128, 64*64 * 2),
+            nn.LogSoftmax(dim=1),
         )
-        self.layer_b = nn.Sequential(
-            nn.Linear(32*64, 128*128),
-            nn.Linear(128*128, 64*64),
-        )
-        self.combine = nn.Sequential(
-            nn.Linear(3*64*64, 32*32),
-            nn.Linear(32*32, 4)
-        )
+        self.unflatten = nn.Unflatten(1, (2, 64, 64))
+
     def forward(self, x):
-        x = self.conv1(x)
-        
-        r = x[:,0]
-        g = x[:,1]
-        b = x[:,2]
-
-        r = torch.flatten(r, 1)
-        r = self.layer_r(r)
-
-        g = torch.flatten(g, 1)
-        g = self.layer_b(g)
-
-        b = torch.flatten(b, 1)
-        b = self.layer_b(b)
-
-        x = torch.cat((r, g, b), 1)
-        x = self.combine(x)
+        x = self.convolutional(x)
+        x = self.linear(x)
+        x = self.unflatten(x)
         return x
-
-def box_to_polygon(box):
-    return ([box[0], box[0], box[1], box[1], box[0]],
-                [box[2], box[3], box[3], box[2], box[2]])
-
-
-async def train(epoch, load_last = True):
-    instance = await Polygon.create()
-    path = "./bdd100k/images/10k/train/"
-    images = os.listdir(path)
-    random.shuffle(images)
     
-    # Variables
-    tile_size = 256
+# Transformation to 1280x720 mask
+def transformOutputToMask(output):
+    mask = output.swapaxes(0, 2).swapaxes(0, 1)
+    mask = cv2.resize(mask, (1280, 720))
+    mask = (mask[:, :, 0] >= mask[:, :, 1]).astype(np.float32)
+    return mask
 
-    model = Segmentation().to(device=train_device)
-    checkpoint_lists = list(filter(lambda x: "segmentation" in x, os.listdir("./models")))
-    last_checkpoint = 0
-    if len(checkpoint_lists) > 0 :
-        last_checkpoint = int(sorted(checkpoint_lists)[-1].split(".")[0].split("_")[-1])
-        print("LAST_CHECKPOINT: ", f"segmentation_{last_checkpoint}")
-        if load_last:
-            model.load_state_dict(torch.load(f'./models/segmentation_{last_checkpoint}.pth'))
-        else:
-            print("Checkpoint not loaded")
+# Evaulation
+async def eval(model):
+    # Get random sample
+    data, target = await getBatch(100, preprocessed=True, resolution=(64, 64))
+    # data, labels = np.load('./binaryDataset/inputs_0.npy'), np.load('./binaryDataset/labels_0.npy')
+    
+    # Feed to network
+    img = torch.tensor(data).to(train_device)
+        
+    # Detach and show result
+    output = model(img)
+    output = output.cpu().detach().numpy()
+    for i in range(data.shape[0]):
+        img = data[i].swapaxes(0, 2)
+        mask = transformOutputToMask(output[i])
+        
+        mask_in_rgb = np.zeros_like(img)
+        mask_in_rgb[:, :, 1] = mask
 
-    criterion = nn.MSELoss(size_average=0.5)
+        marked = cv2.add(img, mask_in_rgb)
+        cv2.imshow("test", marked)
+        cv2.waitKey(500)
 
+async def train():
+    # Settings for training
+    epoch = 100
+    gpu_batch = 4
+    decay = 99/100
     learning_rate = 0.001
-    momentum = 0.00003
-    decay = 0.5
-
+    loss_fn = nn.BCEWithLogitsLoss()
+    
+    # Load Dataset and Model
     running_loss = 0
-    invalid = 0
-    tested = 0
+    model = Segmentation().to(train_device)
+    model.load_state_dict(torch.load("./models/segmentation_0.pth", weights_only=True))
+    images, labels = np.load('./binaryDataset/inputs_0.npy'), np.load('./binaryDataset/labels_0.npy')
+    batch_size = images.shape[0]
+    print("BATCH SIZE", batch_size)
+
+    # Training
     for i in range(epoch):
-        print(f"EPOCH {i+1}/{epoch} ============", f"Learning Rate: {learning_rate * (decay ** i)}", f"Momentum: {momentum * (decay ** i)}")
-        optimizer = optim.RMSprop(model.parameters(), lr=learning_rate * (decay ** i), momentum=momentum * (decay ** i))
-        for i in  tqdm(range(len(images) - 6700)):
-            file = path + images[i]
-            try:
-                datas = await instance.getImgAndBox(file, tile_size=tile_size)
-                
-                valid_imgs = []
-                valid_boxes = []
-                for img, box in datas:
-                    if box != (0, 0, 0, 0) and (box[1] - box[0] >= 10) and (box[3] - box[2] >= 10):
-                        valid_imgs.append(img)
-                        valid_boxes.append(box)
 
-                if (len(valid_imgs) > 0):
-                    valid_imgs = torch.tensor(np.array(valid_imgs), dtype=torch.float).to(device=train_device) / 256
-                    valid_imgs = torch.transpose(valid_imgs, 1, 3)
+        if i % 10 == 0:
+            print(f"=====EPOCH {i + 1}/{epoch}======  lr:", learning_rate)
+            print("RUNNING_LOSS:", running_loss)
 
-                    valid_boxes = torch.tensor(np.array(valid_boxes), dtype=torch.float).to(device=train_device) * (2 / tile_size)
-                    valid_boxes = valid_boxes - 1
-                    
-                    optimizer.zero_grad()
-                    output = model(valid_imgs)
-                    loss = criterion(output, valid_boxes)
-                    loss.backward()
+        # Optimizer setup
+        learning_rate *= decay
+        optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-                    running_loss += loss.item()
-                    
-                    optimizer.step()
-                    tested += len(valid_imgs)
+        for j in range(gpu_batch):
+            optimizer.zero_grad()
+
+            # Set current batch
+            size = batch_size // gpu_batch
+            end = min((size * j) + size, batch_size)
+            data = torch.tensor(images[size * j: end]).to(train_device)
+            target = torch.tensor(labels[size * j: end]).to(train_device)
+            # print(f"Batch {j + 1}/{gpu_batch}", end)
             
-
-            except Exception as e:
-                if str(e) not in ["Invalid Polygon", 
-                                  "'LineString' object has no attribute 'geoms'",
-                                  "'Point' object has no attribute 'geoms'"
-                                  ]:
-                    print(e)
-                invalid += 1
-            if (i % 100 == 0):
-                print(running_loss / (i + 1))
-
-    torch.save(model.state_dict(), f'./models/segmentation_{last_checkpoint + 1}.pth')
-    print("Saved to: ", f"segmentation_{last_checkpoint + 1}")
-    print("Total Running Loss:", running_loss)
-    print("Total invalid", invalid)
-    print("Tested:", tested)
-
-async def eval():
-    instance = await Polygon.create(test=True)
-    path = "./bdd100k/images/10k/val/"
-    images = os.listdir(path)
-    
-    # Variables
-    tile_size = 256
-    min_size = 0
-    max_size = tile_size
-
-    model = Segmentation().cuda()
-    
-    last_checkpoint = sorted(os.listdir("./models"))[-1].split(".")[0].split("_")[-1]
-    print("EVALUATING:", last_checkpoint)
-    model.load_state_dict(torch.load(f'./models/segmentation_{last_checkpoint}.pth'))
-
-    total = 0
-    correct = 0
-    invalid = 0
-    tested = 0
-
-    for i in  tqdm(range(len(images))):
-        file = path + images[i]
-        try:
-            datas = await instance.getImgAndBox(file, tile_size=tile_size)
+            # Feed to network
+            outputs = model.forward(data)
+            loss = loss_fn(outputs, target)
+            running_loss += loss.item()
             
-            for img, box in datas:
-                # Note: 256 not the same as tile_size, this is just based on the 8bit pixel color
-                if box != (0, 0, 0, 0) and box[1] - box[0] >= min_size and box[3] - box[2] >= min_size \
-                    and box[1] - box[0] <= max_size and box[3] - box[2] <= max_size:
-                    plt.clf()
-                    plt.imshow(img)
-                    img = torch.tensor(np.array([img])) / 256
-                    img = img.cuda()
-                    img = torch.transpose(img, 1, 3)
-                    output = model(img)
-                    print(output)
-                    output = (output[0] + 1) * (tile_size / 2)
+            # Calculate loss and optimize
+            loss.backward()
+            optimizer.step()
 
-                    # Calculate Accuracy
-                    for i in range(4):
-                        correct += 1 - abs(box[i] - output[i])
-                    total += 4
-                    
-                    tested += 1
-                    
-                    x, y = box_to_polygon(output.cpu().detach().numpy())
-                    gtX, gtY = box_to_polygon(box)
-                    plt.plot(x, y, 'r')
-                    plt.plot(gtX, gtY, 'b')
-                    plt.pause(0.5)
-        except Exception as e:
-            if str(e) not in ["Invalid Polygon", 
-                                  "'LineString' object has no attribute 'geoms'",
-                                  "'Point' object has no attribute 'geoms'"
-                                  ]:
-                print(e)
-            invalid += 1
-    print("Accuracy:", f'{(correct/total)*100:.2f}%')
-    print("Invalid:", invalid)
-    print("Tested:", tested)
+    # Save to disk
+    torch.save(model.state_dict(), f'./models/segmentation_0.pth')
 
-asyncio.run(train(3))
-asyncio.run(eval())
-# asyncio.run(sandbox())
+    # Eval
+    await eval(model)
+
+# Run evaluation
+model = Segmentation().to(train_device)
+model.load_state_dict(torch.load("./models/segmentation_0.pth", weights_only=True))
+asyncio.run(eval(model))
+
+# Train
+# asyncio.run(train())
