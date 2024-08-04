@@ -7,13 +7,13 @@ from dotenv import load_dotenv
 import os
 load_dotenv()
 
-# PLEASE JUST RUN THIS ONCE FOR EACH LABEL TYPES
 async def connect(collection):
     uri = f"mongodb://{os.environ.get('MONGO_USER')}:{os.environ.get('MONGO_PASS')}@localhost:27017"
     client = AsyncIOMotorClient(uri)
     db = client['bdd100k']
     return db[collection]
 
+# PLEASE JUST RUN THIS ONCE FOR EACH LABEL TYPES
 async def loadIntoMongoDB(file: str, collection):
     print(f"Copying {file.split('/')[-1]} into {collection}")
     with open(file) as f:

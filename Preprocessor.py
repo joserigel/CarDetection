@@ -7,6 +7,23 @@ from tqdm import tqdm
 import random
 import numpy as np
 
+dataset = os.listdir("bdd100k/images/10k/train/")
+async def filter_dataset():
+    dbConnection = await connect("det")
+    detections = dbConnection.find({"attributes": {
+        "weather": "clear",
+        "timeofday": "daytime",
+        "scene":"city street"}
+        })
+    names = []
+    async for row in detections:
+        name = row["name"]
+        if name in dataset:
+            names.append(name)
+    return names
+
+filtered_dataset = asyncio.run(filter_dataset())
+
 async def imageMask(name, res = (720, 1280)):
     dbConnection = await connect("sem_seg_polygons")
     data = await dbConnection.find_one({"name": name})
@@ -26,30 +43,8 @@ async def preprocess(image):
     mid = 0.5
     mean = np.mean(gray)
     gamma = np.log(mid*255)/np.log(mean)
-    corrected = np.power(image, gamma).clip(0,255).astype(np.uint8) #/ 255
-    # edges = cv2.Canny(image, 100, 200) / 255
-    # corrected[:, :, 0] *= edges
-    # corrected[:, :, 1] *= edges
-    # corrected[:, :, 2] *= edges
-    return corrected #* 255
-directory = os.listdir("bdd100k/images/10k/train/")
-async def filter():
-    dbConnection = await connect("det")
-    detections = dbConnection.find({"attributes": {
-        "weather": "clear",
-        "timeofday": "daytime",
-        "scene":"city street"}
-        })
-    names = []
-    async for row in detections:
-        name = row["name"]
-        if name in directory:
-            names.append(name)
-    return names
-
-samples = asyncio.run(filter())
-
-
+    corrected = np.power(image, gamma).clip(0,255).astype(np.uint8) 
+    return corrected 
 
 async def getBatch(size, resolution=(240, 427), preprocessed=True):
     dbConnection = await connect("sem_seg_polygons")
@@ -57,8 +52,7 @@ async def getBatch(size, resolution=(240, 427), preprocessed=True):
     inputs = np.zeros((size, 3, 1280, 720), dtype=np.float32)
     labels = np.zeros((size, 2, resolution[1], resolution[0]), dtype=np.float32)
     
-    sample = random.sample(directory, size)
-    
+    sample = random.sample(dataset, size)
     
     for i, image in enumerate(tqdm(sample)):
         input_image = cv2.imread(f"bdd100k/images/10k/train/{image}")
@@ -86,18 +80,18 @@ async def getBatch(size, resolution=(240, 427), preprocessed=True):
 
     return inputs / 255, labels
 
-directory = samples
+dataset = filtered_dataset
 async def saveToStorage(count, resolution=(240, 427), preprocessed=True):
-    size = len(directory) // count
+    size = len(dataset) // count
     dbConnection = await connect("sem_seg_polygons")
 
     for batch in range(count):
         print("BATCH:", batch + 1, "/", count)
-        actual_size = min(size, len(directory) - (size * batch))
+        actual_size = min(size, len(dataset) - (size * batch))
         inputs = np.zeros((actual_size, 3, 1280, 720), dtype=np.float32)
         labels = np.zeros((actual_size, 2, resolution[1], resolution[0]), dtype=np.float32)
 
-        for i, image in enumerate(tqdm(directory[size * batch : (size * batch) + size])):
+        for i, image in enumerate(tqdm(dataset[size * batch : (size * batch) + size])):
             input_image = cv2.imread(f"bdd100k/images/10k/train/{image}")
             if preprocessed:
                 input_image = await preprocess(input_image)
@@ -120,12 +114,12 @@ async def saveToStorage(count, resolution=(240, 427), preprocessed=True):
             
             labels[i] = [mask / 255, inverted / 255]
 
-        with open(f'binaryDataset/inputs_{batch}.npy', 'wb') as f:
+        with open(f'binaryDataset/inputs_{batch}_test.npy', 'wb') as f:
             np.save(f, inputs / 255)
 
-        with open(f'binaryDataset/labels_{batch}.npy', 'wb') as f:
+        with open(f'binaryDataset/labels_{batch}_test.npy', 'wb') as f:
             np.save(f, labels)
 
-# asyncio.run(saveToStorage(1, resolution=(64, 64)))
+# asyncio.run(saveToStorage(44, resolution=(64, 64)))
 
         
