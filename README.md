@@ -80,8 +80,11 @@ python DataReader.py
 
 ## Notes 
 
-### February 11 2024
+### 11 February 2024
 I converted this project from last year's attempt that wasn't succesful using the YOLO algorithm to also detect cars, so `Segmentation.py` is not working
+
+### 4 August 2024
+This has taken longer than expected, but the `Segmentation.py` is now working better.
 
 <details>
     <summary>Classes Count</summary>

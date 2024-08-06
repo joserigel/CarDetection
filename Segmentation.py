@@ -3,6 +3,7 @@ import torch.nn as nn
 import numpy as np
 import cv2
 import asyncio
+from tqdm import tqdm
 
 from Preprocessor import getBatch
 
@@ -26,12 +27,12 @@ class Segmentation(nn.Module):
         )
         self.linear = nn.Sequential(
             nn.Flatten(),
-            nn.Linear(18270, 64*128),
+            nn.Linear(2394, 64*128*3),
             nn.LeakyReLU(),
-            nn.Linear(64*128, 64*64 * 2),
+            nn.Linear(64*128*3, 64*36 * 2),
             nn.LogSoftmax(dim=1),
         )
-        self.unflatten = nn.Unflatten(1, (2, 64, 64))
+        self.unflatten = nn.Unflatten(1, (2, 64, 36))
 
     def forward(self, x):
         x = self.convolutional(x)
@@ -42,15 +43,18 @@ class Segmentation(nn.Module):
 # Transformation to 1280x720 mask
 def transformOutputToMask(output):
     mask = output.swapaxes(0, 2).swapaxes(0, 1)
-    mask = cv2.resize(mask, (1280, 720))
+    mask = cv2.resize(mask, (480, 270), interpolation=cv2.INTER_NEAREST)
     mask = (mask[:, :, 0] >= mask[:, :, 1]).astype(np.float32)
     return mask
 
 # Evaulation
 async def eval(model):
     # Get random sample
-    data, target = await getBatch(100, preprocessed=True, resolution=(64, 64))
-    # data, labels = np.load('./binaryDataset/inputs_0.npy'), np.load('./binaryDataset/labels_0.npy')
+    data, target = await getBatch(100, 
+        preprocessed=False, 
+        out_res=(36, 64),
+        dataset="val"
+        )
     
     # Feed to network
     img = torch.tensor(data).to(train_device)
@@ -58,73 +62,97 @@ async def eval(model):
     # Detach and show result
     output = model(img)
     output = output.cpu().detach().numpy()
+    accuracy = 0
     for i in range(data.shape[0]):
         img = data[i].swapaxes(0, 2)
         mask = transformOutputToMask(output[i])
+        gt = transformOutputToMask(target[i])
         
         mask_in_rgb = np.zeros_like(img)
-        mask_in_rgb[:, :, 1] = mask
+        mask_in_rgb[:, :, 1] = np.logical_and(mask, gt)
+        mask_in_rgb[:, :, 2] = np.logical_xor(mask, gt)
+
+        intersection = np.sum(np.logical_and(gt, mask).astype(np.uint8))
+        union = np.sum(np.logical_or(gt, mask).astype(np.uint8))
+        if union == 0:
+            accuracy += 1
+        else:
+            accuracy +=  intersection / union
 
         marked = cv2.add(img, mask_in_rgb)
+        marked = cv2.resize(marked, (1280, 720))
         cv2.imshow("test", marked)
-        cv2.waitKey(500)
+        cv2.waitKey(0)
+    
+    print(f"Accuracy: {(accuracy / data.shape[0]):2f}")
 
 async def train():
     # Settings for training
-    epoch = 100
-    gpu_batch = 4
-    decay = 99/100
-    learning_rate = 0.001
+    epoch = 30
+    gpu_batch = 10
+    batch_count = 3
+    decay = 1
+    learning_rate = 0.00001
+    dataset = "noise"
     loss_fn = nn.BCEWithLogitsLoss()
     
     # Load Dataset and Model
     running_loss = 0
     model = Segmentation().to(train_device)
-    model.load_state_dict(torch.load("./models/segmentation_0.pth", weights_only=True))
-    images, labels = np.load('./binaryDataset/inputs_0.npy'), np.load('./binaryDataset/labels_0.npy')
-    batch_size = images.shape[0]
-    print("BATCH SIZE", batch_size)
+    model.load_state_dict(torch.load("./models/segmentation_4.pth", weights_only=True))
 
     # Training
-    for i in range(epoch):
-
+    for i in tqdm(range(epoch)):
         if i % 10 == 0:
             print(f"=====EPOCH {i + 1}/{epoch}======  lr:", learning_rate)
-            print("RUNNING_LOSS:", running_loss)
 
         # Optimizer setup
         learning_rate *= decay
         optimizer = torch.optim.Adam(model.parameters(), lr=learning_rate)
 
-        for j in range(gpu_batch):
-            optimizer.zero_grad()
+        for batch in range(batch_count):
+            
+            # Load batch from storage
+            print(f"Batch: {batch + 1}/{batch_count}")
+            images = np.load(f'./binaryDataset/inputs_{dataset}_{batch}.npy')
+            labels = np.load(f'./binaryDataset/labels_{dataset}_{batch}.npy')
 
-            # Set current batch
-            size = batch_size // gpu_batch
-            end = min((size * j) + size, batch_size)
-            data = torch.tensor(images[size * j: end]).to(train_device)
-            target = torch.tensor(labels[size * j: end]).to(train_device)
-            # print(f"Batch {j + 1}/{gpu_batch}", end)
-            
-            # Feed to network
-            outputs = model.forward(data)
-            loss = loss_fn(outputs, target)
-            running_loss += loss.item()
-            
-            # Calculate loss and optimize
-            loss.backward()
-            optimizer.step()
+            # images, labels = await getBatch(100, 
+            #         preprocessed=True, 
+            #         out_res=(36, 64),
+            #         dataset="train"
+            #     )
+
+            batch_size = images.shape[0]
+
+            for j in range(gpu_batch):
+                optimizer.zero_grad()
+
+                # Set current batch
+                size = batch_size // gpu_batch
+                end = min((size * j) + size, batch_size)
+                data = torch.tensor(images[size * j: end]).to(train_device)
+                target = torch.tensor(labels[size * j: end]).to(train_device)
+                # print(f"Batch {j + 1}/{gpu_batch}", end)
+                
+                # Feed to network
+                outputs = model.forward(data)
+                loss = loss_fn(outputs, target)
+                running_loss += loss.item()
+                
+                # Calculate loss and optimize
+                loss.backward()
+                optimizer.step()
+        
+        print("RUNNING_LOSS:", running_loss)
 
     # Save to disk
-    torch.save(model.state_dict(), f'./models/segmentation_0.pth')
-
-    # Eval
-    await eval(model)
-
-# Run evaluation
-model = Segmentation().to(train_device)
-model.load_state_dict(torch.load("./models/segmentation_0.pth", weights_only=True))
-asyncio.run(eval(model))
+    torch.save(model.state_dict(), f'./models/segmentation_5.pth')
 
 # Train
 # asyncio.run(train())
+
+# Run evaluation
+model = Segmentation().to(train_device)
+model.load_state_dict(torch.load("./models/segmentation_5.pth", weights_only=True))
+asyncio.run(eval(model))
