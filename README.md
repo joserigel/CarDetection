@@ -86,6 +86,9 @@ I converted this project from last year's attempt that wasn't succesful using th
 ### 4 August 2024
 This has taken longer than expected, but the `Segmentation.py` is now working better.
 
+### 13 August 2024
+In many cases, the prediction is very good, but overfits to the train data.
+
 <details>
     <summary>Classes Count</summary>
     
