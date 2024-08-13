@@ -1,5 +1,5 @@
-# Lane Detection
-This project is mainly focused on Distinct grid based classification of roads using the [BDD100K](https://bair.berkeley.edu/blog/2018/05/30/bdd/) dataset.
+# Vehicle Detection
+This project is mainly focused on per pixel based classification of vehicle using the [BDD100K](https://bair.berkeley.edu/blog/2018/05/30/bdd/) dataset.
 
 ## Setup
 
