@@ -7,15 +7,10 @@ from tqdm import tqdm
 import random
 import numpy as np
 
-async def filter_dataset():
-    dbConnection = await connect("det")
-    detections = dbConnection.find({"attributes.timeofday": "daytime", "attributes.weather": "clear"})
-    names = []
-    async for row in detections:
-        name = row["name"]
-        if name in train_dataset:
-            names.append(name)
-    return names
+IMG_DIR = "bdd100k/images/10k"
+DEF_IN_RES=(480, 270)
+DEF_OUT_RES=(64, 36)
+TRAIN_DATASET = sorted(os.listdir(f"{IMG_DIR}/train"))
 
 def drawMask(img, polygons):
     for polygon in polygons:
@@ -24,82 +19,118 @@ def drawMask(img, polygons):
 
         cv2.fillPoly(img, pts.astype(dtype=np.int32), color=255)
 
-
-async def preprocess(image):
+async def add_noise(image):
     return image * (1 - 0.1*np.random.rand(720, 1280, 3))
 
-
-def createTarget(in_res, data, resolution):
+def createTarget(data, resolution):
+    # Initialize matrix
     cars = np.zeros((720, 1280), dtype=np.float32)
+
+    # Iterate through all labels that are car/truck/bus
     for label in data["labels"]:
         if label["category"] in ["car", "truck", "bus"]:
             drawMask(cars, label["poly2d"])
-                
-    cars = cv2.resize(cars, resolution, interpolation=cv2.INTER_NEAREST) / 255
+    
+    # Normalize and resize to target res
+    cars = cv2.resize(cars, resolution, interpolation=cv2.INTER_NEAREST)
+    cars = cars.swapaxes(0, 1)
+
+    cars = np.where(cars > 0, 1, 0)
     unlabeled =  1 - cars
 
     return cars, unlabeled
 
-async def getBatch(
-        size, in_res=(480, 270), out_res=(240, 427), 
-        preprocessed=True, dataset = "val"
+async def getImageFromDisk(file, in_res=DEF_IN_RES, with_noise=True, dataset="train"):
+    
+    # Get image from disk
+    img = cv2.imread(f"{IMG_DIR}/{dataset}/{file}") / 255
+
+    # Add noise
+    if with_noise:
+        img = await add_noise(img)
+
+    # Resize input
+    h, w, c = img.shape
+    if w != in_res[0] or h != in_res[1]:
+        img = cv2.resize(img, in_res, interpolation=cv2.INTER_CUBIC)
+
+    # Swap axes
+    img = img.swapaxes(0, 2)
+
+    return img
+
+async def createTargetBatch(dbConnection, files = [], out_res=DEF_OUT_RES):
+    
+    # Initialize array
+    targets = np.zeros((len(files), 2, out_res[0], out_res[1]), dtype=np.float32)
+
+    for i, file in enumerate(tqdm(files)):
+        
+        # Create mask
+        data = await dbConnection.find_one({"name": file})
+        cars, unlabeled = createTarget(data, out_res)
+
+        # Broadcast to array
+        targets[i] = [cars, unlabeled]
+
+    return targets
+
+
+async def getImageBatch(files, in_res=DEF_IN_RES, with_noise=True, dataset="train"):
+    imgs = np.zeros((len(files), 3, in_res[0], in_res[1]), dtype=np.float32)
+
+    # Initialize arrays
+    for i, file in enumerate(files):
+        imgs[i] = await getImageFromDisk(file, in_res, with_noise, dataset)
+    return imgs
+
+async def getVal(
+        size, dataset = "val",
+        in_res=DEF_IN_RES, out_res=DEF_OUT_RES, 
+        with_noise=True, 
     ):
-    dbConnection = await connect("sem_seg_polygons" 
-        + ("_val" if dataset == "val" else "")
+    dbConnection = await connect(
+        "sem_seg_polygons" + ("_val" if dataset == "val" else "")
         )
     
-    inputs = np.zeros((size, 3, in_res[0], in_res[1]), dtype=np.float32)
-    labels = np.zeros((size, 2, out_res[1], out_res[0]), dtype=np.float32)
+    files = random.sample(os.listdir(f"{IMG_DIR}/{dataset}"), size)
     
-    sample = random.sample(os.listdir(f"bdd100k/images/10k/{dataset}"), size)
+    images = await getImageBatch(files, in_res, with_noise, "val")
+    targets = await createTargetBatch(dbConnection, files, out_res)
+
+    return images, targets
+
+async def getBatch(name, batch_count, idx, in_res=DEF_IN_RES, with_noise=True):
+    # Load from disk
+    target = np.load(f'./binaryDataset/labels_{name}_{idx}.npy')
     
-    for i, image in enumerate(tqdm(sample)):
-        inp_image = cv2.imread(f"bdd100k/images/10k/{dataset}/{image}") / 255
-        if preprocessed:
-            inp_image = await preprocess(inp_image)
-        inp_image = cv2.resize(inp_image, in_res, interpolation=cv2.INTER_CUBIC)
-        inp_image = inp_image.swapaxes(0, 2)
-        
-        data = await dbConnection.find_one({"name": image})
-        cars, unlabeled = createTarget(in_res, data, out_res)
-       
-        labels[i] = [cars, unlabeled]
-        inputs[i] = inp_image
-    return inputs, labels
+    # Calculate indices
+    size = len(TRAIN_DATASET) // batch_count
+    start = size * idx
+    end = start + target.shape[0]
 
+    files = TRAIN_DATASET[start:end]
 
-async def saveToStorage(count, in_res=(480, 270), out_res=(240, 427), preprocessed=True, name="dataset"):
-    size = len(train_dataset) // count
+    # Get images
+    images = await getImageBatch(files, in_res, with_noise, "train")
+
+    return images, target     
+
+async def saveToStorage(size, name, out_res=DEF_OUT_RES):
+    batch_count  = len(TRAIN_DATASET) // size
     dbConnection = await connect("sem_seg_polygons")
+    
+    for i in range(batch_count):
+        print(f"BATCH: {i + 1}/{batch_count}")
+        start = size * i
+        end = start + min(size, len(TRAIN_DATASET) - (size * i))
+        files = TRAIN_DATASET[start : end]
 
-    for batch in range(count):
-        print("BATCH:", batch + 1, "/", count)
-        actual_size = min(size, len(train_dataset) - (size * batch))
-        inputs = np.zeros((actual_size, 3, in_res[0], in_res[1]), dtype=np.float32)
-        labels = np.zeros((actual_size, 2, out_res[1], out_res[0]), dtype=np.float32)
+        targets = await createTargetBatch(dbConnection, files, out_res)
 
-        for i, image in enumerate(tqdm(train_dataset[size * batch : (size * batch) + size])):
-            inp_image = cv2.imread(f"bdd100k/images/10k/train/{image}") / 255
-            if preprocessed:
-                inp_image = await preprocess(inp_image)
-            inp_image = cv2.resize(inp_image, in_res, interpolation=cv2.INTER_CUBIC)
-            inp_image = inp_image.swapaxes(0, 2)
-            
-            data = await dbConnection.find_one({"name": image})
-            cars, unlabeled = createTarget(inp_image, data, out_res)
+        with open(f'binaryDataset/labels_{name}_{i}.npy', 'wb') as f:
+            np.save(f, targets)
 
-            labels[i] = [cars, unlabeled]
-            inputs[i] = inp_image 
-
-        with open(f'binaryDataset/inputs_{name}_{batch}.npy', 'wb') as f:
-            np.save(f, inputs)
-
-        with open(f'binaryDataset/labels_{name}_{batch}.npy', 'wb') as f:
-            np.save(f, labels)
-
-train_dataset = os.listdir("bdd100k/images/10k/train/")
-filtered_dataset = asyncio.run(filter_dataset())
-# dataset = filtered_dataset
-# asyncio.run(saveToStorage(7, out_res=(156, 86), name="n", preprocessed=True))
+# asyncio.run(saveToStorage(125, name="noise_raw"))
 
         
